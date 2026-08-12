@@ -1,0 +1,34 @@
+env_type: libero_ood
+task_suite_name: libero_spatial_ood
+
+total_num_envs: 10
+rollout_epoch: 10
+
+auto_reset: True
+ignore_terminations: True
+max_episode_steps: 300
+# OpenVLA-OFT predicts 8 actions. The specialized OOD worker runs 38 model
+# calls and trims the final chunk to 4 actions, for exactly 300 policy steps.
+max_steps_per_rollout_epoch: 304
+
+use_rel_reward: True
+reward_coef: 1.0
+
+reset_gripper_open: True
+num_steps_wait: 10
+num_trials_per_task: 10
+is_eval: True
+
+seed: 7
+group_size: 1
+use_fixed_reset_state_ids: True
+use_ordered_reset_state_ids: True
+
+video_cfg:
+  save_video: True
+  info_on_video: True
+  video_base_dir: ${runner.logger.log_path}/video/eval
+
+init_params:
+  camera_heights: 256
+  camera_widths: 256
