@@ -38,7 +38,7 @@ env:
 
   eval:
     rollout_epoch: 1
-    total_num_envs: 30 #500
+    total_num_envs: 10 #500
     auto_reset: True
     ignore_terminations: True
     max_episode_steps: 512
@@ -68,5 +68,5 @@ rollout:
   model:
     model_path: "/path/to/model/Openvla-oft-SFT-libero-object-traj1/"
     model_type: "openvla_oft"
-    unnorm_key: libero_object_no_noops
+    unnorm_key: libero_130_no_noops_trajall
     max_prompt_length: 128
