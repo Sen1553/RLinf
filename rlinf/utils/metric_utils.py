@@ -185,6 +185,34 @@ def count_trajectories(metrics_dict):
         raise TypeError(f"Unsupported tensor type: {type(first_tensor)}")
 
 
+def _compute_task_success_metrics(eval_metrics_list):
+    """Aggregate task success without counting other tasks as failures."""
+    successes_by_task: dict[int, list[torch.Tensor]] = {}
+    for metrics in eval_metrics_list:
+        if "task_id" not in metrics or "success_once" not in metrics:
+            continue
+
+        task_ids = _normalize_metric_shard(metrics["task_id"]).long()
+        successes = _normalize_metric_shard(metrics["success_once"]).bool()
+        if task_ids.shape != successes.shape:
+            raise ValueError(
+                "task_id and success_once metrics must have matching shapes."
+            )
+
+        for task_id in torch.unique(task_ids).tolist():
+            task_successes = successes[task_ids == task_id].float()
+            successes_by_task.setdefault(int(task_id), []).append(task_successes)
+
+    task_metrics = {}
+    for task_id, success_shards in sorted(successes_by_task.items()):
+        successes = torch.cat(success_shards)
+        task_metrics[f"task_{task_id}_success"] = successes.mean().cpu().numpy()
+        task_metrics[f"task_{task_id}_success_total"] = np.asarray(
+            successes.numel(), dtype=np.int64
+        )
+    return task_metrics
+
+
 def compute_evaluate_metrics(eval_metrics_list):
     """
     List of evaluate metrics, list length stands for rollout process
@@ -196,9 +224,20 @@ def compute_evaluate_metrics(eval_metrics_list):
         return {}
 
     all_eval_metrics = {}
+    task_metrics = _compute_task_success_metrics(eval_metrics_list)
     env_info_keys: set[str] = set()
     for eval_metrics in eval_metrics_list:
         env_info_keys.update(eval_metrics.keys())
+
+    # ``task_id`` is categorical, not a scalar metric. The per-task success
+    # tensors include placeholders for other tasks, so aggregate them through
+    # task_id above instead of taking an unfiltered mean here.
+    env_info_keys.discard("task_id")
+    env_info_keys = {
+        key
+        for key in env_info_keys
+        if not (key.startswith("task_") and key.endswith("_success"))
+    }
 
     # Count trajectories from each process
     trajectory_counts = []
@@ -226,6 +265,7 @@ def compute_evaluate_metrics(eval_metrics_list):
 
     # Add total trajectory count to metrics
     all_eval_metrics["num_trajectories"] = sum(trajectory_counts)
+    all_eval_metrics.update(task_metrics)
 
     return all_eval_metrics
 

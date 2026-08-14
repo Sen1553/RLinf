@@ -59,6 +59,14 @@ Vision-Language-Action 工具箱，支持将 VLM backbone 与 action head 以模
      - LIBERO-Spatial
      - ``libero_spatial_grpo_starvla``
      - 在 LIBERO 上使用 GRPO 微调 StarVLA。
+   * - Modified LIBERO
+     - LIBERO-Goal-OOD
+     - ``libero_goal_ood_grpo_starvla_qwen25``
+     - 使用随机 BDDL reset 在目标套件上进行 GRPO 训练。
+   * - Modified LIBERO
+     - LIBERO-Spatial-OOD
+     - ``libero_spatial_ood_grpo_starvla_qwen25``
+     - 使用随机 BDDL reset 在目标套件上进行 GRPO 训练。
 
 观测与动作
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -191,6 +199,50 @@ StarVLA + GRPO + LIBERO Spatial 使用
    bash examples/embodiment/run_embodiment.sh libero_spatial_grpo_starvla
 
 评估建议采用 RLinf 统一的评估流程，详见 :doc:`LIBERO 评测指南 <../../evaluations/guides/libero>`。
+
+在 LIBERO-OOD 上训练
+----------------------------------------
+
+LIBERO-OOD 配置使用 ``third_party/modified_libero`` 下的修改版 LIBERO。
+无需新建另一份启动脚本：``run_embodiment.sh`` 会识别 OOD 配置，将修改版包置于
+``PYTHONPATH`` 的最前面，并在 ``logs/libero_ood_config`` 下生成隔离的 LIBERO 路径配置。
+
+设置 Qwen2.5-VL-OFT checkpoint，然后启动所需的目标套件：
+
+.. code-block:: bash
+
+   export STARVLA_MODEL_PATH=/path/to/Qwen2.5-VL-OFT-LIBERO-4in1
+
+   # 10 个 Goal-OOD 任务。
+   bash examples/embodiment/run_embodiment.sh \
+      libero_goal_ood_grpo_starvla_qwen25
+
+   # 10 个 Spatial-OOD 任务。
+   bash examples/embodiment/run_embodiment.sh \
+      libero_spatial_ood_grpo_starvla_qwen25
+
+如果修改版仓库不在默认位置，请在启动前将 ``LIBERO_OOD_ROOT`` 指向包含
+``libero/libero`` 的目录。
+
+.. important::
+
+   一旦在 Goal-OOD 或 Spatial-OOD 上训练，这些任务就成为训练任务。此时结果衡量的是
+   目标套件上的在线适应能力，而不是零样本 OOD 泛化能力。若要研究后者，应只在标准
+   LIBERO 上训练，并将全部 20 个 OOD 任务保留为测试集。
+
+StarVLA 每次 forward 预测 8 个动作。常规训练 worker 因此在训练及训练内验证中使用
+可整除的 304 步 horizon。训练结束后，应使用独立评估器执行基准严格规定的 300 步、
+每任务 10 次协议：
+
+.. code-block:: bash
+
+   MODEL_PATH=/path/to/exported/checkpoint \
+   bash evaluations/run_libero_ood_eval.sh \
+      libero_goal_ood_starvla_qwen25_oft_eval
+
+提供的 OOD 训练配置启用了 actor/rollout offload，并将 micro batch 设为 1，以降低单卡
+显存压力。但 3B VLM、优化器和 rollout 模型在部分 checkpoint 或运行环境中仍可能超过
+24 GB；此时需要多卡训练，或继续调整 batch 与优化器配置。
 
 可视化与结果
 ----------------------------------------

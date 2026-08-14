@@ -1,0 +1,70 @@
+defaults:
+  - env/libero_goal_ood@env.eval
+  - model/starvla@rollout.model
+  - _self_
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+  searchpath:
+    - file://${oc.env:EMBODIED_PATH}/config/
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    env,rollout: 0-0
+
+runner:
+  task_type: embodied_eval
+  logger:
+    log_path: "../results"
+    project_name: rlinf
+    experiment_name: "libero_goal_ood_starvla_qwen25_oft_eval"
+    logger_backends: ["tensorboard"]
+
+  max_epochs: 1000
+  max_steps: -1
+  only_eval: True
+  val_check_interval: -1
+  save_interval: -1
+  resume_dir: null
+  ckpt_path: null
+
+env:
+  group_name: "EnvGroup"
+  enable_offload: False
+
+rollout:
+  sampling_params:
+    # QwenOFT evaluation executes the deterministic action-head mean.
+    do_sample: False
+    temperature_train: 1.0
+    temperature_eval: 1.0
+    top_k: 0
+    top_p: 1.0
+    repetition_penalty: 1.0
+
+  group_name: "RolloutGroup"
+  generation_backend: "huggingface"
+  recompute_logprobs: False
+  enable_offload: False
+  pipeline_stage_num: 1
+
+  model:
+    model_path: /home/sen/data/new_python_project/CRL_Project/starVLA/playground/Pretrained_models/Qwen2.5-VL-OFT-LIBERO-4in1
+    model_type: "starvla"
+    precision: "bf16"
+    action_dim: 7
+    num_action_chunks: 8
+    unnorm_key: "franka"
+    action_stats_source: "minmax"
+    policy_setup: "libero"
+    add_value_head: False
+    is_lora: False
+    starvla:
+      framework_name: "QwenOFT"
+      expected_action_dim: ${rollout.model.action_dim}
+      expected_num_action_chunks: ${rollout.model.num_action_chunks}
+      enable_state_input: False

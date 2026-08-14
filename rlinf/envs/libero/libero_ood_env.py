@@ -20,21 +20,40 @@ from rlinf.envs.libero.libero_env import LiberoEnv
 from rlinf.envs.utils import to_tensor
 
 
+def get_libero_ood_env_seed(
+    base_seed: int,
+    task_id: int,
+    trial_id: int,
+    num_trials_per_task: int,
+    is_eval: bool,
+) -> int:
+    """Return the construction seed for one logical OOD task/trial.
+
+    Evaluation intentionally gives every task process the reference seed. During
+    training, logical trial IDs are folded into the seed so different GRPO groups
+    do not all begin from the same placement-sampler state.
+    """
+    if is_eval:
+        return int(base_seed)
+    return int(base_seed + task_id * num_trials_per_task + trial_id)
+
+
 class LiberoOODEnv(LiberoEnv):
-    """Evaluate modified-LIBERO OOD tasks without fixed initial-state files.
+    """Run modified-LIBERO OOD tasks without fixed initial-state files.
 
     A reset ID is a logical ``(task_id, trial_id)`` identifier only. Unlike the
     standard :class:`LiberoEnv`, it is never resolved through
     ``get_task_init_states`` or passed to ``set_init_state``. Each task process
-    is seeded once when constructed; consecutive resets therefore advance the
-    BDDL placement sampler exactly as in the pi0-text-latent evaluator.
+    is seeded when constructed; consecutive resets then advance the BDDL
+    placement sampler instead of loading a fixed state.
+
+    Evaluation uses seed 7 (or ``cfg.seed``) for every process to match the
+    pi0-text-latent evaluator. Training derives a deterministic seed from each
+    logical task/trial ID, while all members of a GRPO group still receive the
+    same seed and initial placement.
     """
 
     def __init__(self, cfg, num_envs, seed_offset, total_num_processes, worker_info):
-        if not cfg.get("is_eval", False):
-            raise ValueError(
-                "LiberoOODEnv is evaluation-only; set env.eval.is_eval=true."
-            )
         self.num_trials_per_task = int(cfg.get("num_trials_per_task", 10))
         if self.num_trials_per_task <= 0:
             raise ValueError("num_trials_per_task must be positive.")
@@ -67,11 +86,20 @@ class LiberoOODEnv(LiberoEnv):
         self._valid_reset_state_ids = np.asarray(reset_state_ids, dtype=np.int64)
 
     def get_env_fn_params(self, env_idx=None):
+        if env_idx is None:
+            selected_env_ids = np.arange(self.num_envs)
+        else:
+            # LiberoEnv emits parameters in ascending environment-ID order.
+            selected_env_ids = np.sort(np.asarray(env_idx, dtype=np.int64))
         env_fn_params = super().get_env_fn_params(env_idx)
-        # The reference evaluator uses the same seed for every task environment.
-        # Do not add the distributed worker offset here.
-        for params in env_fn_params:
-            params["seed"] = int(self.cfg.seed)
+        for params, env_id in zip(env_fn_params, selected_env_ids, strict=True):
+            params["seed"] = get_libero_ood_env_seed(
+                base_seed=int(self.cfg.seed),
+                task_id=int(self.task_ids[env_id]),
+                trial_id=int(self.trial_ids[env_id]),
+                num_trials_per_task=self.num_trials_per_task,
+                is_eval=self.is_eval,
+            )
         return env_fn_params
 
     def _reconfigure(self, reset_state_ids, env_idx):

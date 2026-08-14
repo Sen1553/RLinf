@@ -60,6 +60,14 @@ Select the model page by matching the environment, task family, and config or ch
      - LIBERO-Spatial
      - ``libero_spatial_grpo_starvla``
      - GRPO fine-tuning for StarVLA in LIBERO.
+   * - Modified LIBERO
+     - LIBERO-Goal-OOD
+     - ``libero_goal_ood_grpo_starvla_qwen25``
+     - Target-suite GRPO training with random BDDL resets.
+   * - Modified LIBERO
+     - LIBERO-Spatial-OOD
+     - ``libero_spatial_ood_grpo_starvla_qwen25``
+     - Target-suite GRPO training with random BDDL resets.
 
 Observation and Action
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -196,6 +204,55 @@ your download and set the action interface:
 
 For evaluation, use RLinf's unified evaluation workflow — see the
 :doc:`LIBERO evaluation guide <../../evaluations/guides/libero>`.
+
+Train on LIBERO-OOD
+-------------------
+
+The LIBERO-OOD configs use the modified LIBERO package under
+``third_party/modified_libero``. You do not need another launcher:
+``run_embodiment.sh`` detects an OOD config, prepends the modified package to
+``PYTHONPATH``, and creates an isolated LIBERO path configuration under
+``logs/libero_ood_config``.
+
+Set the Qwen2.5-VL-OFT checkpoint and launch either target suite:
+
+.. code-block:: bash
+
+   export STARVLA_MODEL_PATH=/path/to/Qwen2.5-VL-OFT-LIBERO-4in1
+
+   # Ten Goal-OOD tasks.
+   bash examples/embodiment/run_embodiment.sh \
+      libero_goal_ood_grpo_starvla_qwen25
+
+   # Ten Spatial-OOD tasks.
+   bash examples/embodiment/run_embodiment.sh \
+      libero_spatial_ood_grpo_starvla_qwen25
+
+If the modified repository is elsewhere, set ``LIBERO_OOD_ROOT`` to the
+directory containing ``libero/libero`` before launching.
+
+.. important::
+
+   Training on Goal-OOD or Spatial-OOD turns those tasks into training tasks.
+   The resulting score measures target-suite online adaptation, not zero-shot
+   OOD generalization. For the latter, train only on standard LIBERO and reserve
+   all 20 OOD tasks for evaluation.
+
+StarVLA predicts eight actions per forward pass. The normal training worker
+therefore uses a chunk-aligned 304-step horizon for training and in-loop
+validation. Run the standalone evaluator after training for the benchmark's
+exact 300-step, 10-trial-per-task protocol:
+
+.. code-block:: bash
+
+   MODEL_PATH=/path/to/exported/checkpoint \
+   bash evaluations/run_libero_ood_eval.sh \
+      libero_goal_ood_starvla_qwen25_oft_eval
+
+The provided OOD training configs enable actor and rollout offloading and use a
+micro-batch size of one to reduce one-GPU memory pressure. A 3B VLM, optimizer,
+and rollout model can still exceed a 24 GB GPU depending on the checkpoint and
+runtime; multi-GPU training or further batch/optimizer tuning may be required.
 
 Visualization and Results
 -------------------------

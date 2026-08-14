@@ -592,6 +592,19 @@ class LiberoEnv(gym.Env):
             ]
 
         self.success_once = self.success_once | terminations
+
+        # Keep the task identity alongside each episode metric so evaluation
+        # runners can group completed trajectories by task across env workers.
+        # The task-specific tensors mirror the historical continual-VLA
+        # logging format; ``task_id`` is the authoritative grouping field
+        # because entries for environments running other tasks are placeholders.
+        episode_info["task_id"] = self.task_ids.copy()
+        for task_id in np.unique(self.task_ids):
+            task_mask = self.task_ids == task_id
+            task_success = np.zeros(self.num_envs, dtype=bool)
+            task_success[task_mask] = self.success_once[task_mask]
+            episode_info[f"task_{int(task_id)}_success"] = task_success
+
         episode_info["success_once"] = self.success_once.copy()
         episode_info["return"] = self.returns.copy()
         episode_info["episode_len"] = self.elapsed_steps.copy()

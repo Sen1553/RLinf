@@ -3,12 +3,23 @@ import pytest
 import torch
 
 from rlinf.envs import SupportedEnvType
+from rlinf.envs.libero.libero_ood_env import get_libero_ood_env_seed
 from rlinf.runners.libero_ood_eval_runner import compute_libero_ood_task_metrics
 from rlinf.workers.env.libero_ood_eval_worker import get_final_action_chunk_size
 
 
 def test_libero_ood_env_type_is_registered():
     assert SupportedEnvType("libero_ood") == SupportedEnvType.LIBERO_OOD
+
+
+def test_libero_ood_eval_seed_matches_reference_protocol():
+    assert get_libero_ood_env_seed(7, 8, 4, 10, is_eval=True) == 7
+
+
+def test_libero_ood_training_seed_varies_by_logical_task_and_trial():
+    assert get_libero_ood_env_seed(7, 0, 0, 10, is_eval=False) == 7
+    assert get_libero_ood_env_seed(7, 0, 1, 10, is_eval=False) == 8
+    assert get_libero_ood_env_seed(7, 2, 3, 10, is_eval=False) == 30
 
 
 @pytest.mark.parametrize(
