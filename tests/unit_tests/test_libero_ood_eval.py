@@ -1,9 +1,14 @@
 import numpy as np
 import pytest
 import torch
+from omegaconf import OmegaConf
 
 from rlinf.envs import SupportedEnvType
-from rlinf.envs.libero.libero_ood_env import get_libero_ood_env_seed
+from rlinf.envs.libero.libero_ood_env import (
+    LiberoOODEnv,
+    get_libero_ood_env_seed,
+    get_libero_ood_eval_trials_per_task,
+)
 from rlinf.runners.libero_ood_eval_runner import compute_libero_ood_task_metrics
 from rlinf.workers.env.libero_ood_eval_worker import get_final_action_chunk_size
 
@@ -12,14 +17,44 @@ def test_libero_ood_env_type_is_registered():
     assert SupportedEnvType("libero_ood") == SupportedEnvType.LIBERO_OOD
 
 
-def test_libero_ood_eval_seed_matches_reference_protocol():
-    assert get_libero_ood_env_seed(7, 8, 4, 10, is_eval=True) == 7
+def test_libero_ood_eval_trials_are_derived_from_parallel_capacity():
+    assert get_libero_ood_eval_trials_per_task(10, 10, 1, 10) == 10
+    assert get_libero_ood_eval_trials_per_task(30, 5, 1, 10) == 15
+    assert get_libero_ood_eval_trials_per_task(20, 5, 2, 10) == 5
 
 
-def test_libero_ood_training_seed_varies_by_logical_task_and_trial():
-    assert get_libero_ood_env_seed(7, 0, 0, 10, is_eval=False) == 7
-    assert get_libero_ood_env_seed(7, 0, 1, 10, is_eval=False) == 8
-    assert get_libero_ood_env_seed(7, 2, 3, 10, is_eval=False) == 30
+def test_libero_ood_eval_trials_require_balanced_task_coverage():
+    with pytest.raises(ValueError, match="divisible"):
+        get_libero_ood_eval_trials_per_task(8, 1, 1, 10)
+
+
+def test_libero_ood_env_builds_eval_pool_without_trial_count_config():
+    env = LiberoOODEnv.__new__(LiberoOODEnv)
+    env.task_suite = type("TaskSuite", (), {"get_num_tasks": lambda self: 10})()
+    env.task_id_filter = None
+    env.is_eval = True
+    env.cfg = OmegaConf.create(
+        {"total_num_envs": 30, "rollout_epoch": 5, "group_size": 1}
+    )
+
+    env._compute_total_num_group_envs()
+
+    assert env.trial_id_bins == [15] * 10
+    assert env.total_num_group_envs == 150
+    assert env._valid_reset_state_ids is None
+
+
+def test_libero_ood_seed_uses_global_logical_environment_offset():
+    assert get_libero_ood_env_seed(7, 0, 0, 2, 1) == 7
+    assert get_libero_ood_env_seed(7, 1, 0, 2, 1) == 8
+    assert get_libero_ood_env_seed(7, 0, 1, 2, 1) == 9
+    assert get_libero_ood_env_seed(7, 1, 1, 2, 1) == 10
+
+
+def test_libero_ood_seed_is_shared_within_rl_group():
+    group_seeds = [get_libero_ood_env_seed(42, 0, env_id, 1, 10) for env_id in range(10)]
+    assert group_seeds == [42] * 10
+    assert get_libero_ood_env_seed(42, 0, 10, 1, 10) == 43
 
 
 @pytest.mark.parametrize(

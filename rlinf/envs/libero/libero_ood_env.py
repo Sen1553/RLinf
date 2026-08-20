@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""LIBERO-OOD environment using the benchmark's random-reset protocol."""
+"""LIBERO-OOD environment using BDDL-sampled initial placements."""
+
+import math
 
 import numpy as np
 
@@ -22,20 +24,54 @@ from rlinf.envs.utils import to_tensor
 
 def get_libero_ood_env_seed(
     base_seed: int,
-    task_id: int,
-    trial_id: int,
-    num_trials_per_task: int,
-    is_eval: bool,
+    process_index: int,
+    local_env_id: int,
+    total_num_processes: int,
+    group_size: int,
 ) -> int:
-    """Return the construction seed for one logical OOD task/trial.
+    """Return a deterministic seed for one logical parallel environment.
 
-    Evaluation intentionally gives every task process the reference seed. During
-    training, logical trial IDs are folded into the seed so different GRPO groups
-    do not all begin from the same placement-sampler state.
+    This follows LIBERO's base-seed-plus-process-offset convention while also
+    distinguishing vectorized environments inside one process. Members of the
+    same RL group intentionally share a seed; different groups use independent
+    placement-sampler streams.
     """
-    if is_eval:
-        return int(base_seed)
-    return int(base_seed + task_id * num_trials_per_task + trial_id)
+    if process_index < 0 or local_env_id < 0:
+        raise ValueError("process_index and local_env_id must be non-negative.")
+    if total_num_processes <= 0 or group_size <= 0:
+        raise ValueError("total_num_processes and group_size must be positive.")
+    if process_index >= total_num_processes:
+        raise ValueError("process_index must be smaller than total_num_processes.")
+    logical_local_env_id = local_env_id // group_size
+    logical_global_env_id = (
+        logical_local_env_id * total_num_processes + process_index
+    )
+    return int(base_seed + logical_global_env_id)
+
+
+def get_libero_ood_eval_trials_per_task(
+    total_num_envs: int,
+    rollout_epoch: int,
+    group_size: int,
+    num_tasks: int,
+) -> int:
+    """Derive the number of unique evaluation episodes for each OOD task."""
+    if total_num_envs <= 0 or rollout_epoch <= 0:
+        raise ValueError("total_num_envs and rollout_epoch must be positive.")
+    if group_size <= 0 or num_tasks <= 0:
+        raise ValueError("group_size and num_tasks must be positive.")
+    if total_num_envs % group_size != 0:
+        raise ValueError("total_num_envs must be divisible by group_size.")
+
+    total_eval_episodes = total_num_envs // group_size * rollout_epoch
+    if total_eval_episodes % num_tasks != 0:
+        raise ValueError(
+            "LIBERO-OOD evaluation requires "
+            "(total_num_envs / group_size) * rollout_epoch to be divisible "
+            f"by the number of evaluated tasks ({num_tasks}); got "
+            f"{total_eval_episodes} logical episodes."
+        )
+    return total_eval_episodes // num_tasks
 
 
 class LiberoOODEnv(LiberoEnv):
@@ -47,29 +83,22 @@ class LiberoOODEnv(LiberoEnv):
     is seeded when constructed; consecutive resets then advance the BDDL
     placement sampler instead of loading a fixed state.
 
-    Evaluation uses seed 7 (or ``cfg.seed``) for every process to match the
-    pi0-text-latent evaluator. Training derives a deterministic seed from each
-    logical task/trial ID, while all members of a GRPO group still receive the
-    same seed and initial placement.
+    Evaluation derives its logical trial budget from ``total_num_envs`` and
+    ``rollout_epoch``. No fixed initial-state file or per-task trial-count option
+    is required. Seeds follow the parallel environment layout, and consecutive
+    resets advance each environment's placement-sampler RNG stream.
     """
 
     def __init__(self, cfg, num_envs, seed_offset, total_num_processes, worker_info):
-        self.num_trials_per_task = int(cfg.get("num_trials_per_task", 10))
-        if self.num_trials_per_task <= 0:
-            raise ValueError("num_trials_per_task must be positive.")
         super().__init__(cfg, num_envs, seed_offset, total_num_processes, worker_info)
 
     def _compute_total_num_group_envs(self):
         num_tasks = self.task_suite.get_num_tasks()
-        self.trial_id_bins = [self.num_trials_per_task] * num_tasks
-        self.total_num_group_envs = num_tasks * self.num_trials_per_task
-        self.cumsum_trial_id_bins = np.cumsum(self.trial_id_bins)
-
-        if self.task_id_filter is None:
-            self._valid_reset_state_ids = None
-            return
-
-        validated_task_ids = sorted({int(task_id) for task_id in self.task_id_filter})
+        validated_task_ids = (
+            list(range(num_tasks))
+            if self.task_id_filter is None
+            else sorted({int(task_id) for task_id in self.task_id_filter})
+        )
         invalid = [
             task_id for task_id in validated_task_ids if not 0 <= task_id < num_tasks
         ]
@@ -78,6 +107,37 @@ class LiberoOODEnv(LiberoEnv):
                 f"task_id_filter contains invalid task IDs {invalid}; "
                 f"expected IDs in [0, {num_tasks - 1}]."
             )
+        if not validated_task_ids:
+            raise ValueError("task_id_filter must select at least one task.")
+
+        total_num_envs = int(self.cfg.total_num_envs)
+        group_size = int(self.cfg.group_size)
+        if total_num_envs <= 0 or group_size <= 0:
+            raise ValueError("total_num_envs and group_size must be positive.")
+        if total_num_envs % group_size != 0:
+            raise ValueError("total_num_envs must be divisible by group_size.")
+        num_logical_envs = total_num_envs // group_size
+        if self.is_eval:
+            trials_per_task = get_libero_ood_eval_trials_per_task(
+                total_num_envs=total_num_envs,
+                rollout_epoch=int(self.cfg.rollout_epoch),
+                group_size=group_size,
+                num_tasks=len(validated_task_ids),
+            )
+        else:
+            # Training samples reset IDs rather than exhausting a finite pool.
+            # Keep enough logical IDs to seed the currently parallel RL groups.
+            trials_per_task = max(
+                1, math.ceil(num_logical_envs / len(validated_task_ids))
+            )
+
+        self.trial_id_bins = [trials_per_task] * num_tasks
+        self.total_num_group_envs = num_tasks * trials_per_task
+        self.cumsum_trial_id_bins = np.cumsum(self.trial_id_bins)
+
+        if self.task_id_filter is None:
+            self._valid_reset_state_ids = None
+            return
 
         reset_state_ids = []
         for task_id in validated_task_ids:
@@ -95,10 +155,10 @@ class LiberoOODEnv(LiberoEnv):
         for params, env_id in zip(env_fn_params, selected_env_ids, strict=True):
             params["seed"] = get_libero_ood_env_seed(
                 base_seed=int(self.cfg.seed),
-                task_id=int(self.task_ids[env_id]),
-                trial_id=int(self.trial_ids[env_id]),
-                num_trials_per_task=self.num_trials_per_task,
-                is_eval=self.is_eval,
+                process_index=int(self.seed_offset),
+                local_env_id=int(env_id),
+                total_num_processes=int(self.total_num_processes),
+                group_size=int(self.group_size),
             )
         return env_fn_params
 

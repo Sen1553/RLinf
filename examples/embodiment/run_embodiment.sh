@@ -26,17 +26,19 @@ export CARB_APP_PATH=${CARB_APP_PATH:-$ISAAC_PATH/kit}
 # POLARIS dataset
 export POLARIS_DATA_PATH=${POLARIS_DATA_PATH:-"/path/to/dataset/PolaRiS-Hub"}
 
-if [ -z "$1" ]; then
+if [ -z "${1:-}" ]; then
     CONFIG_NAME=${CONFIG_NAME:-"maniskill_ppo_openvlaoft"}
 else
     CONFIG_NAME=$1
+    shift
 fi
 
 # LIBERO-OOD reuses the normal embodied entrypoint, but it must import the
 # benchmark's modified LIBERO package before the standard installed package.
-if [[ "${CONFIG_NAME}" == libero_goal_ood* || \
-      "${CONFIG_NAME}" == libero_spatial_ood* || \
-      "${CONFIG_NAME}" == libero_object_ood* ]]; then
+CONFIG_BASENAME=${CONFIG_NAME##*/}
+if [[ "${CONFIG_BASENAME}" == libero_goal_ood* || \
+      "${CONFIG_BASENAME}" == libero_spatial_ood* || \
+      "${CONFIG_BASENAME}" == libero_object_ood* ]]; then
     MODIFIED_LIBERO_ROOT=${LIBERO_OOD_ROOT:-"${REPO_PATH}/third_party/modified_libero"}
     LIBERO_CORE="${MODIFIED_LIBERO_ROOT}/libero/libero"
     if [ ! -d "${LIBERO_CORE}/bddl_files/libero_goal_ood" ]; then
@@ -56,8 +58,17 @@ if [[ "${CONFIG_NAME}" == libero_goal_ood* || \
     echo "Using modified LIBERO at ${MODIFIED_LIBERO_ROOT}"
 fi
 
-# NOTE: Set the active robot platform (required for correct action dimension and normalization), supported platforms are LIBERO, ALOHA, BRIDGE, default is LIBERO
-ROBOT_PLATFORM=${2:-${ROBOT_PLATFORM:-"LIBERO"}}
+# NOTE: Set the active robot platform (required for correct action dimension and
+# normalization). For backward compatibility, the first remaining positional
+# argument is treated as a platform only when it has no "=". All other arguments
+# are forwarded to Hydra as overrides.
+if [ $# -gt 0 ] && [[ "$1" != *=* ]]; then
+    ROBOT_PLATFORM=$1
+    shift
+else
+    ROBOT_PLATFORM=${ROBOT_PLATFORM:-"LIBERO"}
+fi
+HYDRA_OVERRIDES=("$@")
 
 export ROBOT_PLATFORM
 
@@ -72,17 +83,25 @@ fi
 echo "Using ROBOT_PLATFORM=$ROBOT_PLATFORM"
 
 echo "Using Python at $(which python)"
-LOG_DIR="${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}" #/$(date +'%Y%m%d-%H:%M:%S')"
+LOG_DIR=${RUN_LOG_DIR:-"${REPO_PATH}/logs/$(date +'%Y%m%d-%H:%M:%S')-${CONFIG_NAME}"}
 MEGA_LOG_FILE="${LOG_DIR}/run_embodiment.log"
 mkdir -p "${LOG_DIR}"
 # Forward optional overrides exported by callers (e.g. tests/parity_tests/run_all.sh).
 # Sentinel: "-2" means "do not override, use YAML default". -1 is a legitimate value
 # (e.g. runner.max_steps=-1 means unlimited) and is forwarded as-is.
-EXTRA_OVERRIDES=""
-[ -n "${STEPS:-}" ]      && [ "$STEPS"      != "-2" ] && EXTRA_OVERRIDES+=" runner.max_steps=${STEPS}"
-[ -n "${SAVE_INTER:-}" ] && [ "$SAVE_INTER" != "-2" ] && EXTRA_OVERRIDES+=" runner.save_interval=${SAVE_INTER}"
-[ -n "${NODES:-}" ]      && [ "$NODES"      != "-2" ] && EXTRA_OVERRIDES+=" cluster.num_nodes=${NODES}"
+EXTRA_OVERRIDES=()
+[ -n "${STEPS:-}" ]      && [ "$STEPS"      != "-2" ] && EXTRA_OVERRIDES+=("runner.max_steps=${STEPS}")
+[ -n "${SAVE_INTER:-}" ] && [ "$SAVE_INTER" != "-2" ] && EXTRA_OVERRIDES+=("runner.save_interval=${SAVE_INTER}")
+[ -n "${NODES:-}" ]      && [ "$NODES"      != "-2" ] && EXTRA_OVERRIDES+=("cluster.num_nodes=${NODES}")
 
-CMD="python ${SRC_FILE} --config-path ${EMBODIED_PATH}/config/ --config-name ${CONFIG_NAME} runner.logger.log_path=${LOG_DIR}${EXTRA_OVERRIDES}"
-echo ${CMD} > ${MEGA_LOG_FILE}
-${CMD} 2>&1 | tee -a ${MEGA_LOG_FILE}
+CMD=(
+    python "${SRC_FILE}"
+    --config-path "${EMBODIED_PATH}/config/"
+    --config-name "${CONFIG_NAME}"
+    "runner.logger.log_path=${LOG_DIR}"
+    "${EXTRA_OVERRIDES[@]}"
+    "${HYDRA_OVERRIDES[@]}"
+)
+printf '%q ' "${CMD[@]}" > "${MEGA_LOG_FILE}"
+printf '\n' >> "${MEGA_LOG_FILE}"
+"${CMD[@]}" 2>&1 | tee -a "${MEGA_LOG_FILE}"

@@ -3,6 +3,7 @@ task_suite_name: libero_goal_ood
 
 total_num_envs: 10
 rollout_epoch: 10
+# 10 environments * 10 epochs / 10 tasks = 10 episodes per task.
 
 auto_reset: True
 ignore_terminations: True
@@ -16,7 +17,6 @@ reward_coef: 1.0
 
 reset_gripper_open: True
 num_steps_wait: 10
-num_trials_per_task: 10
 is_eval: True
 
 seed: 7

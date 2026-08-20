@@ -29,6 +29,7 @@ RLinf 是一个灵活且可扩展的开源框架，专为具身智能和智能�
 </div>
 
 ## 最新动态
+- [2026/08] 🔥 RLinf 支持在 LIBERO 任务区间上进行单任务训练和顺序 LoRA 微调，并支持修改版 LIBERO-OOD 套件。文档：[LIBERO 顺序 LoRA 微调](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/continual_libero.html)。
 - [2026/08] 🔥 RLinf 支持在 [LIBERO-OOD](https://github.com/QuanyiLi/pi0-text-latent) 上进行分布式评测，包括随机 reset 协议与每任务成功率。文档：[LIBERO-OOD 评测](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/libero_ood.html)。
 - [2026/07] 🎉 RLinf v0.3 发布，主要升级：真机 RL 全流程（数据采集 → SFT → RL → 部署）、更多模拟器与 SOTA 模型、系统级优化。发布说明：[RLinf v0.3](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/resources/release_v0.3.html)。
 - [2026/07] 🔥 RLinf 支持 RLT，用于 VLA 策略的在线强化学习微调。文档：[RLT](https://rlinf.readthedocs.io/zh-cn/latest/rst_source/examples/embodied/rlt.html)。

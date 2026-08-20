@@ -30,6 +30,7 @@ RLinf is a flexible and scalable open-source RL infrastructure designed for Embo
 
 
 ## What's NEW!
+- [2026/08] 🔥 RLinf supports single-task and sequential LoRA fine-tuning across LIBERO task ranges, including modified LIBERO-OOD suites. Doc: [Sequential LoRA Fine-Tuning on LIBERO](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/continual_libero.html).
 - [2026/08] 🔥 RLinf supports distributed evaluation on [LIBERO-OOD](https://github.com/QuanyiLi/pi0-text-latent), including its random-reset protocol and per-task success metrics. Doc: [LIBERO-OOD Evaluation](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/libero_ood.html).
 - [2026/07] 🎉 RLinf v0.3 is released with major upgrades in the real-world RL full pipeline (data collection → SFT → RL → deployment), more simulators and SOTA models, and system-level optimizations. Release notes: [RLinf v0.3](https://rlinf.readthedocs.io/en/latest/rst_source/resources/release_v0.3.html).
 - [2026/07] 🔥 RLinf supports RLT for online RL fine-tuning of VLA policies. Doc: [RLT](https://rlinf.readthedocs.io/en/latest/rst_source/examples/embodied/rlt.html).

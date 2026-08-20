@@ -1,6 +1,6 @@
 # RLinf × LIBERO-OOD 项目交接文档
 
-最后更新：2026-08-13
+最后更新：2026-08-16
 
 ## 1. 项目目标
 
@@ -266,14 +266,16 @@ env:
 同一个逻辑 `(task_id, trial_id)` 被复制给一个 10-trajectory GRPO group。组内环境使用相同
 任务、BDDL 和构造 seed，从尽可能一致的初始布局出发，再通过策略随机性生成不同轨迹。
 
-训练构造 seed 为：
+训练和评估均采用“基础 seed + 全局逻辑环境编号”：
 
 ```python
-base_seed + task_id * num_trials_per_task + trial_id
+base_seed + (local_env_id // group_size) * total_num_processes + process_index
 ```
 
-如果同一环境进程没有切换任务，则不会在每次 reset 时重新 seed，而是继续推进当前 BDDL
-sampler 的 RNG，从而获得后续随机布局。
+同一 GRPO group 的成员共享 seed，不同逻辑环境使用不同 seed。如果同一环境进程没有切换任务，
+则不会在每次 reset 时重新 seed，而是继续推进当前 BDDL sampler 的 RNG，从而获得后续随机
+布局。OOD 评估不再配置每任务 trial 数；每任务次数由
+``(total_num_envs / group_size) * rollout_epoch / 任务数`` 自动推导。
 
 ### 7.4 训练 horizon
 
@@ -359,28 +361,20 @@ git checkout -- .
 git clean -fd
 ```
 
-截至本文生成时，`git status --short` 包含：
+截至 2026-08-16 本轮持续训练实现完成时，`git status --short` 包含：
 
 ```text
- M docs/source-en/rst_source/examples/embodied/starvla.rst
- M docs/source-zh/rst_source/examples/embodied/starvla.rst
- M examples/embodiment/config/env/libero_goal_ood.yaml
- M examples/embodiment/config/env/libero_spatial_ood.yaml
+ M LIBERO_OOD_HANDOFF.md
+ M README.md
+ M README.zh-CN.md
+ M docs/source-en/rst_source/examples/methods_index.rst
+ M docs/source-zh/rst_source/examples/methods_index.rst
  M examples/embodiment/run_embodiment.sh
- M rlinf/envs/libero/libero_env.py
- M rlinf/envs/libero/libero_ood_env.py
- M rlinf/utils/metric_utils.py
- M tests/unit_tests/test_libero_ood_eval.py
-?? evaluations/libero/libero_spatial_starvla_qwen25_eval.yaml
-?? evaluations/libero_ood/libero_goal_ood_starvla_qwen25_oft_eval.yaml
-?? evaluations/libero_ood/libero_object_ood_starvla_qwen25_oft_eval.yaml
-?? evaluations/libero_ood/libero_spatial_ood_starvla_qwen25_oft_eval.yaml
-?? examples/embodiment/config/libero_goal_ood_grpo_starvla_qwen25.yaml
-?? examples/embodiment/config/libero_spatial_grpo_starvla_qwen25.yaml
-?? examples/embodiment/config/libero_spatial_ood_grpo_starvla_qwen25.yaml
-?? tests/unit_tests/test_metric_utils.py
-?? third_party/modified_libero/libero/__init__.py
-?? LIBERO_OOD_HANDOFF.md
+?? docs/source-en/rst_source/examples/embodied/continual_libero.rst
+?? docs/source-zh/rst_source/examples/embodied/continual_libero.rst
+?? examples/crl_experiment/
+?? examples/embodiment/config/crl_experiment/
+?? tests/unit_tests/test_crl_sequential_scripts.py
 ```
 
 注意：Git 未跟踪文件同样包含必要实现或用户配置，不能因为是 `??` 就删除。
@@ -398,7 +392,8 @@ git clean -fd
 6. `bash -n examples/embodiment/run_embodiment.sh`；
 7. Ruff check/format；
 8. `git diff --check`；
-9. 相关单元测试 11 项通过。
+9. CRL 单任务/区间解析、checkpoint 查找和三任务接续模拟；
+10. 相关单元测试合计 18 项通过。
 
 测试命令：
 
@@ -407,14 +402,16 @@ PYTHONPATH=/home/sen/data/new_python_project/RLinf \
 LIBERO_CONFIG_PATH=/tmp/rlinf-libero-ood-test-config \
 MPLCONFIGDIR=/tmp/rlinf-mpl-config \
 .venv-starvla/bin/pytest -q \
+  tests/unit_tests/test_crl_sequential_scripts.py \
+  tests/unit_tests/test_crl_lora_v03.py \
   tests/unit_tests/test_libero_ood_eval.py \
   tests/unit_tests/test_metric_utils.py
 ```
 
-最近结果：
+最近结果（包含 A800 Goal-OOD 配置合成测试）：
 
 ```text
-11 passed
+21 passed
 ```
 
 Sphinx 全量文档构建没有完成，原因是当前调用到的 Sphinx 环境缺少 `myst_parser`；这不是
@@ -430,6 +427,10 @@ RST 内容错误。中英文 StarVLA 页面已做命令、配置名和内容一�
 6. 最终训练 checkpoint 可能需要导出/转换为 StarVLA evaluator 可直接加载的推理格式；
 7. 不要将 OOD 训练后的分数描述成零样本 OOD 泛化；
 8. 提交代码前应重新检查所有 untracked 文件并决定哪些属于本次正式改动。
+9. Sequential LoRA Fine-Tuning 尚未在真实 GPU 上完成任务 0→1 的长时间训练；目前已完成
+   Hydra 合成、PEFT 严格权重往返测试和 fake launcher 的三任务 checkpoint 接续测试；
+10. 当前只实现 Sequential LoRA Fine-Tuning，未实现 EWC、ER、DER、Weight Merge 或 SLCA；
+11. 顺序脚本会关闭训练内 validation；需要用独立 evaluator 检查每阶段对全部任务的遗忘。
 
 推荐接手顺序：
 
@@ -443,7 +444,64 @@ RST 内容错误。中英文 StarVLA 页面已做命令、配置名和内容一�
 → 整理提交范围和文档
 ```
 
-## 12. 新 Codex 账号接手提示词
+## 12. Sequential LoRA Fine-Tuning 实现
+
+参考 `UT-Austin-RobIn/continual-vla-rl`，已增加：
+
+- `examples/crl_experiment/run_embodiment_sequential.sh`；
+- `examples/crl_experiment/common_functions.sh`；
+- `examples/embodiment/config/crl_experiment/libero_spatial_grpo_starvla_qwen25.yaml`；
+- `examples/embodiment/config/crl_experiment/libero_goal_ood_grpo_lora_starvla_a800_1gpu.yaml`；
+- `examples/embodiment/config/model/starvla.yaml` 中的 v0.3 LoRA schema；
+- `tests/unit_tests/test_crl_sequential_scripts.py`；
+- `tests/unit_tests/test_crl_lora_v03.py`；
+- 中英文 `continual_libero.rst` 示例与 methods gallery 入口。
+
+这里实现的是 **Sequential LoRA Fine-Tuning**，不是全参数微调。顺序脚本对每一个任务
+强制设置：
+
+```text
+actor.model.is_lora=true
+actor.model.lora_rank=32
+actor.model.lora_path=null
+```
+
+PEFT 会冻结基础 StarVLA/Qwen2.5-VL 参数，RLinf v0.3 的 FSDP optimizer 只接收
+`requires_grad=True` 的 LoRA 参数。可以用 `CRL_LORA_RANK` 修改 rank，但同一条顺序链中的
+所有任务必须使用相同 rank。
+
+版本差异不能忽略：上游 `continual-vla-rl` 基于 RLinf v0.1，保存 adapter 目录并通过
+`actor.model.lora_path` 传给下一任务；本仓库是 RLinf v0.3，标准 FSDP saver 即使只训练
+LoRA，也会输出 LoRA-wrapped 模型的完整 `actor/model_state_dict/full_weights.pt`。因此本
+实现每个任务都重新创建相同 LoRA 拓扑，再通过 `runner.ckpt_path` 严格加载上一任务的
+`full_weights.pt`。该文件体积仍接近完整模型 checkpoint，但实际可训练参数仍只有 LoRA。
+不要把 v0.1 的 `actor/` adapter 目录直接作为此脚本的初始 checkpoint。
+
+默认单任务训练：
+
+```bash
+export STARVLA_MODEL_PATH=/home/sen/data/new_python_project/CRL_Project/starVLA/playground/Pretrained_models/Qwen2.5-VL-OFT-LIBERO-4in1
+bash examples/crl_experiment/run_embodiment_sequential.sh 0
+```
+
+按顺序训练标准 LIBERO-Spatial 的任务 0 到 4：
+
+```bash
+bash examples/crl_experiment/run_embodiment_sequential.sh "0,4"
+```
+
+按顺序训练 Goal-OOD 的任务 0 到 4：
+
+```bash
+bash examples/crl_experiment/run_embodiment_sequential.sh \
+  "0,4" "" 10 libero_goal_ood_grpo_starvla_qwen25 42
+```
+
+每个任务都是独立 RLinf v0.3 run，只通过
+`actor/model_state_dict/full_weights.pt → runner.ckpt_path` 接续模型权重；optimizer、scheduler
+和 global step 在任务间重置。输出根目录中使用 `latest_checkpoint.txt` 指向当前最新权重。
+
+## 13. 新 Codex 账号接手提示词
 
 切换账号后，在仓库根目录开启新会话并发送：
 
@@ -453,4 +511,3 @@ RST 内容错误。中英文 StarVLA 页面已做命令、配置名和内容一�
 不要 reset、checkout 或 clean。请基于交接文档继续 RLinf × LIBERO-OOD 工作，并在采取
 修改前先确认现有评估、训练配置、modified LIBERO 路径以及 300/304 步协议。
 ```
-

@@ -12,9 +12,11 @@ precision: "bf16"
 action_dim: 7
 num_action_chunks: 8
 
-# LoRA settings (disabled by default for StarVLA wrapper path)
+# LoRA settings. RLinf v0.3 can either create a new adapter when lora_path is
+# null or load a PEFT adapter directory when lora_path is set.
 is_lora: False
 lora_rank: 32
+lora_path: null
 
 # Common embodied fields used by RLinf validation / env adapters.
 use_proprio: True
